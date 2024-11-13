@@ -4,288 +4,221 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
-	"log"
-	"math/big"
-	"strings"
-	"time"
-
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/gorilla/websocket"
+	"github.io/kevin-rd/evm-bench/eth"
+	"log"
+	"math/big"
+	"net/http"
+	"strings"
+	"time"
 )
 
-// JSON-RPC request structure
-type JSONRPCRequest struct {
-	Jsonrpc string        `json:"jsonrpc"`
-	Method  string        `json:"method"`
-	Params  []interface{} `json:"params"`
-	ID      int           `json:"id"`
-}
+const (
+	wsURL            = "ws://127.0.0.1:8546"
+	rpcAddr          = "http://127.0.0.1:26657"
+	chainID    int64 = 5151
+	maxPending       = 10000
 
-// JSON-RPC response structure
-type JSONRPCResponse struct {
-	Jsonrpc string          `json:"jsonrpc"`
-	ID      int             `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *JSONRPCError   `json:"error,omitempty"`
-}
+	privateKeyHex        = "0xf78a036930ce63791ea6ea20072986d8c3f16a6811f6a2583b0787c45086f769"
+	recipient            = "0x32a91324730D77FC25cfFF5a21038f306b6a8a30"
+	gasLimit      uint64 = 42000
+	gasPrice             = 1000000000
+)
 
-type JSONRPCError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
+var (
+	privateKey  *ecdsa.PrivateKey
+	fromAddress common.Address
+	toAddress   common.Address
+)
 
-func main() {
-	// Configuration
-	wsURL := "ws://154.223.178.3:8546"
-	recipient := "0x32a91324730D77FC25cfFF5a21038f306b6a8a30"
-	privateKeyHex := "0xf78a036930ce63791ea6ea20072986d8c3f16a6811f6a2583b0787c45086f769"
-	maxGap := 5 * 60                   // 5 minutes in seconds
-	maxPending := 5000                 // Maximum pending transactions
-	gasPrice := big.NewInt(1000000000) // 1 Gwei
-	gasLimit := uint64(21000)          // Standard gas limit
-
-	// Initialize account
-	privateKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKeyHex, "0x"))
+func init() {
+	var err error
+	privateKey, err = crypto.HexToECDSA(strings.TrimPrefix(privateKeyHex, "0x"))
 	if err != nil {
 		log.Fatalf("Failed to load private key: %v", err)
 	}
-	publicKey := privateKey.Public()
-	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
-	if !ok {
-		log.Fatal("Cannot assert type: publicKey is not of type *ecdsa.PublicKey")
-	}
-	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+	fromAddress = crypto.PubkeyToAddress(privateKey.PublicKey)
 
-	// Initialize WebSocket connection
-	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+}
+
+func main() {
+	for i := 0; i < 1; i++ {
+		_ = batchSendTxs(5000)
+		time.Sleep(2 * time.Second)
+	}
+}
+
+func batchSendTxs(num int) error {
+	index := 0
+	var success int
+	var nonce uint64
+	var startNonce uint64
+	toAddress = common.HexToAddress(recipient)
+
+	// 建立连接
+	client, err := eth.NewClient(wsURL, rpcAddr)
 	if err != nil {
-		log.Fatalf("Failed to connect to WebSocket: %v", err)
+		log.Fatal("Failed to connect to WebSocket:", err)
 	}
-	defer ws.Close()
 	log.Println("Connected to WebSocket")
+	defer client.Close()
 
-	// Initialize synchronization
-	// var wg sync.WaitGroup
-
-	// Initialize variables
-	var startNonce int64 = -1
-	var sendNonce uint64 = 0
-	var replyCount int = 0
-	var totalSend int = 0
-	var chainID int64 = -1
-	var errorCount int = 0
-	startTime := time.Now().Unix()
-
-	// Create JSON-RPC requests
-	txPoolReq := JSONRPCRequest{
-		Jsonrpc: "2.0",
-		Method:  "txpool_status",
-		Params:  []interface{}{},
-		ID:      0,
+	// send initial request
+	if err := client.WriteJSON(eth.ETH_TransactionCount, []interface{}{fromAddress.Hex(), "pending"}); err != nil {
+		log.Fatalf("Failed to send initial request: %v", err)
 	}
 
-	sendRawTxReq := JSONRPCRequest{
-		Jsonrpc: "2.0",
-		Method:  "eth_sendRawTransaction",
-		Params:  []interface{}{},
-		ID:      1,
-	}
-
-	getNonceReq := JSONRPCRequest{
-		Jsonrpc: "2.0",
-		Method:  "eth_getTransactionCount",
-		Params:  []interface{}{fromAddress.Hex(), "latest"},
-		ID:      3,
-	}
-
-	getChainIDReq := JSONRPCRequest{
-		Jsonrpc: "2.0",
-		Method:  "eth_chainId",
-		Params:  []interface{}{},
-		ID:      4,
-	}
-
-	// Helper function to send JSON-RPC requests
-	sendJSONRPC := func(req JSONRPCRequest) error {
-		message, err := json.Marshal(req)
-		if err != nil {
-			return err
-		}
-		return ws.WriteMessage(websocket.TextMessage, message)
-	}
-
-	// Send initial chain ID request
-	if err := sendJSONRPC(getChainIDReq); err != nil {
-		log.Fatalf("Failed to send chain ID request: %v", err)
-	}
-
-	// Handle incoming messages
-	ws.SetReadDeadline(time.Now().Add(60 * time.Second))
-	ws.SetPongHandler(func(string) error {
-		ws.SetReadDeadline(time.Now().Add(60 * time.Second))
-		return nil
-	})
-
+	// for until total num txs
+	var startTime = time.Now()
 	for {
-		_, message, err := ws.ReadMessage()
+		resp, err := client.ReadResponse()
 		if err != nil {
-			log.Printf("Error reading message: %v", err)
+			log.Printf("Error reading response: %v", err)
+			_ = client.ReConn()
 			continue
 		}
 
-		var resp JSONRPCResponse
-		if err := json.Unmarshal(message, &resp); err != nil {
-			log.Printf("Failed to unmarshal message: %v", err)
-			continue
-		}
-
-		// Handle errors
-		if resp.Error != nil {
-			log.Printf("JSON-RPC Error: %v", resp.Error.Message)
-			errorCount++
-			if errorCount%10 == 0 {
-				log.Println("Too many errors, closing WebSocket")
-				ws.Close()
-				break
-			}
-			continue
-		}
-
-		switch resp.ID {
-		case 0: // txpool_status response
-			var txpoolStatus struct {
-				Pending string `json:"pending"`
-				Queued  string `json:"queued"`
-			}
-			if err := json.Unmarshal(resp.Result, &txpoolStatus); err != nil {
-				log.Printf("Failed to parse txpool_status: %v", err)
+		switch eth.MethodId(resp.ID) {
+		case eth.ETH_TXPoolStatus: // txpool_status
+			pending := getPending()
+			var poolStatus eth.PoolStatus
+			if err := json.Unmarshal(resp.Result, &poolStatus); err != nil {
+				log.Printf("Failed to parse poolStatus: %v", err)
 				continue
 			}
+			log.Printf("num_unconfirmed_txs total: %d", pending)
+			if maxPending-pending < (num - index) {
+				time.Sleep(5 * time.Second)
+				break
+			}
 
-			pending := 0
-			send := 0
-
-			// Fill the transaction pool
-			for (maxPending - pending) > 0 {
-				// Create and sign transaction
-				tx := types.NewTransaction(sendNonce, common.HexToAddress(recipient), big.NewInt(10), gasLimit, gasPrice, nil)
-
-				signedTx, err := types.SignTx(tx, types.NewEIP155Signer(big.NewInt(chainID)), privateKey)
+			for num-index > 0 {
+				tx := types.NewTx(&types.LegacyTx{
+					Nonce:    uint64(nonce),
+					To:       &toAddress,
+					Value:    big.NewInt(1000000000),
+					Gas:      gasLimit,
+					GasPrice: big.NewInt(gasPrice),
+				})
+				signedTx, err := types.SignTx(tx, types.NewLondonSigner(big.NewInt(chainID)), privateKey)
 				if err != nil {
 					log.Printf("Failed to sign transaction: %v", err)
-					continue
+					break
 				}
-
 				rawTx, err := signedTx.MarshalBinary()
 				if err != nil {
 					log.Printf("Failed to marshal transaction: %v", err)
-					continue
+					break
 				}
-
-				// Send raw transaction
-				sendRawTxReq.Params = []interface{}{fmt.Sprintf("0x%x", rawTx)}
-				if err := sendJSONRPC(sendRawTxReq); err != nil {
-					log.Printf("Failed to send raw transaction: %v", err)
-					continue
+				// send raw tx
+				if err := client.WriteJSON(eth.ETH_RawTransaction, []interface{}{fmt.Sprintf("0x%x", rawTx)}); err != nil {
+					log.Printf("Failed to send eth_sendRawTransaction: %v", err)
+					break
 				}
-
 				pending++
-				sendNonce++
-				send++
-				totalSend++
-
-				// Periodically request nonce
-				if send%5000 == 0 {
-					if err := sendJSONRPC(getNonceReq); err != nil {
-						log.Printf("Failed to send nonce request: %v", err)
-					}
+				nonce++
+				index++
+				if index%500 == 0 {
+					log.Printf("Sent tx index:%d, nonce:%d", index, nonce)
 				}
-
-				// Optional: Break if you want to limit sends in one loop
-				// if send >= someLimit {
-				//     break
-				// }
+			}
+			// send initial request
+			if err := client.WriteJSON(eth.ETH_TransactionCount, []interface{}{fromAddress.Hex(), "pending"}); err != nil {
+				log.Fatalf("Failed to send initial request: %v", err)
+			}
+		case eth.ETH_RawTransaction: // eth_sendRawTransaction
+			if resp.Error != nil {
+				log.Printf("eth_sendRawTransaction Error: %v", resp.Error.Message)
+				continue
 			}
 
-			// Request txpool status again
-			if err := sendJSONRPC(txPoolReq); err != nil {
-				log.Printf("Failed to send txpool_status request: %v", err)
+			var txHex string
+			if err := json.Unmarshal(resp.Result, &txHex); err != nil {
+				log.Printf("Failed to parse txHex: %v", err)
+				continue
+			}
+			success++
+			// log.Printf("Received Transaction: %s", txHex)
+		case eth.ETH_TransactionCount: // eth_getTransactionCount
+			if resp.Error != nil {
+				log.Printf("eth_getTransactionCount Error: %v", resp.Error.Message)
+				continue
 			}
 
-		case 3: // eth_getTransactionCount response
-			var nonceValue hexBigInt
-			if err := json.Unmarshal(resp.Result, &nonceValue); err != nil {
+			var nonceValue hexutil.Uint64
+			if err = json.Unmarshal(resp.Result, &nonceValue); err != nil {
 				log.Printf("Failed to parse nonce: %v", err)
 				continue
 			}
-
-			if startNonce < 0 {
-				startNonce = nonceValue.Big.Int64()
-				sendNonce = uint64(startNonce)
-				if err := sendJSONRPC(txPoolReq); err != nil {
-					log.Printf("Failed to send txpool_status request: %v", err)
+			log.Printf("Transaction Nonce: %d", nonceValue)
+			if nonce <= 0 {
+				nonce = uint64(nonceValue)
+				startNonce = uint64(nonceValue)
+				// request tx pool
+				if err := client.WriteJSON(eth.ETH_TXPoolStatus, []interface{}{}); err != nil {
+					log.Printf("Failed to txpool_status request: %v", err)
+					_ = client.ReConn()
 				}
 			} else {
-				endTime := time.Now().Unix()
-				gapTime := endTime - startTime
-				count := nonceValue.Big.Int64() - startNonce
-				tps := float64(totalSend) / float64(gapTime)
-				replyTps := float64(replyCount) / float64(gapTime)
-				log.Printf("Total Send: %d, Cached Txs: %d, Send Reply: %d, Tx Reply: %d, Spend: %d s, Reply TPS: %.2f, TPS: %.2f",
-					totalSend, totalSend-replyCount, replyCount, count, gapTime, replyTps, tps)
-
-				// Check if maxGap time has passed
-				if gapTime > int64(maxGap) {
-					log.Println("Max testing time reached, closing WebSocket")
-					ws.Close()
-					return
-				}
+				// waiting for tx to be confirmed
+				cost := time.Now().Sub(startTime)
+				tps := (float64)(uint64(nonceValue)-startNonce) / cost.Seconds()
+				log.Printf("Total send: %d, confirmed: %d, spend: %fs, tps: %f", index, uint64(nonceValue)-startNonce, cost.Seconds(), tps)
 			}
 
-		case 4: // eth_chainId response
-			var chainIDHex string
-			if err := json.Unmarshal(resp.Result, &chainIDHex); err != nil {
-				log.Printf("Failed to parse chain ID: %v", err)
+		case 4:
+			if resp.Error != nil {
+				log.Printf("JSON-RPC Error: %v", resp.Error.Message)
 				continue
 			}
-			chainIDBig, ok := new(big.Int).SetString(strings.TrimPrefix(chainIDHex, "0x"), 16)
+			var chainIdHex string
+			if err = json.Unmarshal(resp.Result, &chainIdHex); err != nil {
+				log.Printf("Failed to parse chainId: %v", err)
+				continue
+			}
+			chainId, ok := new(big.Int).SetString(strings.TrimPrefix(chainIdHex, "0x"), 16)
 			if !ok {
-				log.Printf("Invalid chain ID format: %s", chainIDHex)
+				log.Printf("Invalid chainId format: %s", chainIdHex)
 				continue
 			}
-			chainID = chainIDBig.Int64()
-			log.Printf("Connected to Chain ID: %d", chainID)
-
-			// Request nonce
-			if err := sendJSONRPC(getNonceReq); err != nil {
-				log.Printf("Failed to send nonce request: %v", err)
+			if chainId.Int64() != chainID {
+				log.Fatal("Invalid chain MethodId")
 			}
-
+			log.Printf("Connected to Chain MethodId: %d", chainId)
 		default:
-			// Handle other responses (e.g., transaction receipts)
-			replyCount++
+			log.Printf("Unknown MethodId: %d", resp.ID)
 		}
 	}
-}
-
-// hexBigInt is a helper type to unmarshal hex string to big.Int
-type hexBigInt struct {
-	Big *big.Int
-}
-
-func (h *hexBigInt) UnmarshalJSON(data []byte) error {
-	// Remove quotes
-	s := strings.Trim(string(data), "\"")
-	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
-		s = s[2:]
-	}
-	i := new(big.Int)
-	_, ok := i.SetString(s, 16)
-	if !ok {
-		return fmt.Errorf("invalid hex string: %s", s)
-	}
-	h.Big = i
 	return nil
+}
+
+func getPending() int {
+	resp, err := http.Get(rpcAddr + "/num_unconfirmed_txs")
+	if err != nil {
+		log.Fatalf("Error sending request: %v", err)
+		return 0
+	}
+	defer resp.Body.Close()
+
+	var data eth.JSONRPCResponse
+	if err = json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		log.Printf("Error decoding JSON: %v", err)
+		return 0
+	}
+
+	var unconfirmedTxs UnconfirmedTxs
+	if err = json.Unmarshal(data.Result, &unconfirmedTxs); err != nil {
+		log.Printf("Error unmarshaling JSON: %v", err)
+		return 0
+	}
+	return unconfirmedTxs.Total
+}
+
+type UnconfirmedTxs struct {
+	Txs        int `json:"n_txs,string"`
+	Total      int `json:"total,string"`
+	TotalBytes int `json:"total_bytes,string"`
 }
