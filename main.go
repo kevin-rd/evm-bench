@@ -20,10 +20,10 @@ const (
 	wsURL            = "ws://127.0.0.1:8546"
 	rpcAddr          = "http://127.0.0.1:26657"
 	chainID    int64 = 5151
-	maxPending       = 10000
+	maxPending       = 5000
 
 	privateKeyHex        = "0xf78a036930ce63791ea6ea20072986d8c3f16a6811f6a2583b0787c45086f769"
-	recipient            = "0x32a91324730D77FC25cfFF5a21038f306b6a8a30"
+	recipient            = "0xb83782C315090b826C670f8a354a9dc3B4942ebf"
 	gasLimit      uint64 = 42000
 	gasPrice             = 1000000000
 )
@@ -90,14 +90,10 @@ func batchSendTxs(num int) error {
 				continue
 			}
 			log.Printf("num_unconfirmed_txs total: %d", pending)
-			if maxPending-pending < (num - index) {
-				time.Sleep(5 * time.Second)
-				break
-			}
 
-			for num-index > 0 {
+			for maxPending-pending >= 500 {
 				tx := types.NewTx(&types.LegacyTx{
-					Nonce:    uint64(nonce),
+					Nonce:    nonce,
 					To:       &toAddress,
 					Value:    big.NewInt(1000000000),
 					Gas:      gasLimit,
@@ -124,10 +120,17 @@ func batchSendTxs(num int) error {
 				if index%500 == 0 {
 					log.Printf("Sent tx index:%d, nonce:%d", index, nonce)
 				}
+				if index%2000 == 0 {
+					// request tx pool
+					if err := client.WriteJSON(eth.ETH_TransactionCount, []interface{}{fromAddress.Hex(), "pending"}); err != nil {
+						log.Printf("Failed to transaction_count request: %v", err)
+						_ = client.ReConn()
+					}
+				}
 			}
-			// send initial request
-			if err := client.WriteJSON(eth.ETH_TransactionCount, []interface{}{fromAddress.Hex(), "pending"}); err != nil {
-				log.Fatalf("Failed to send initial request: %v", err)
+			// send self
+			if err := client.WriteJSON(eth.ETH_TXPoolStatus, []interface{}{}); err != nil {
+				log.Fatalf("Failed to send txpool_status request: %v", err)
 			}
 		case eth.ETH_RawTransaction: // eth_sendRawTransaction
 			if resp.Error != nil {
@@ -167,6 +170,11 @@ func batchSendTxs(num int) error {
 				cost := time.Now().Sub(startTime)
 				tps := (float64)(uint64(nonceValue)-startNonce) / cost.Seconds()
 				log.Printf("Total send: %d, confirmed: %d, spend: %fs, tps: %f", index, uint64(nonceValue)-startNonce, cost.Seconds(), tps)
+
+				if time.Now().Sub(startTime) > time.Minute*1 {
+					log.Printf("Exit.")
+					return nil
+				}
 			}
 
 		case 4:

@@ -18,8 +18,8 @@ func NewClient(url string, rpcAddr string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	_ = ws.SetReadDeadline(time.Now().Add(time.Second * 20))
-	_ = ws.SetWriteDeadline(time.Now().Add(time.Second * 60))
+	_ = ws.SetReadDeadline(time.Now().Add(time.Second * 120))
+	_ = ws.SetWriteDeadline(time.Now().Add(time.Second * 120))
 	c.ws = ws
 	return &c, nil
 }
@@ -32,8 +32,8 @@ func (c *Client) ReConn() error {
 	if err != nil {
 		log.Fatalf("Error ReConn to ws: %v", err)
 	}
-	_ = ws.SetReadDeadline(time.Now().Add(time.Second * 20))
-	_ = ws.SetWriteDeadline(time.Now().Add(time.Second * 60))
+	_ = ws.SetReadDeadline(time.Now().Add(time.Second * 120))
+	_ = ws.SetWriteDeadline(time.Now().Add(time.Second * 120))
 	c.ws = ws
 	return nil
 }
