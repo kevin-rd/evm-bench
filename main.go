@@ -57,6 +57,11 @@ func batchSendTxs(num int) error {
 	var success int
 	var nonce uint64
 	var startNonce uint64
+	var lastNonce uint64
+	var startTime time.Time
+	var lastTime time.Time
+	var lastTps float64
+
 	toAddress = common.HexToAddress(recipient)
 
 	// 建立连接
@@ -73,7 +78,7 @@ func batchSendTxs(num int) error {
 	}
 
 	// for until total num txs
-	var startTime = time.Now()
+	startTime = time.Now()
 	for {
 		resp, err := client.ReadResponse()
 		if err != nil {
@@ -158,10 +163,13 @@ func batchSendTxs(num int) error {
 				log.Printf("Failed to parse nonce: %v", err)
 				continue
 			}
-			log.Printf("Transaction Nonce: %d", nonceValue)
 			if nonce <= 0 {
 				nonce = uint64(nonceValue)
 				startNonce = uint64(nonceValue)
+				lastNonce = startNonce
+				startTime = time.Now()
+				lastTime = startTime
+				log.Printf("Begin to test, %d", startNonce)
 				// request tx pool
 				if err := client.WriteJSON(eth.ETH_TXPoolStatus, []interface{}{}); err != nil {
 					log.Printf("Failed to txpool_status request: %v", err)
@@ -169,9 +177,15 @@ func batchSendTxs(num int) error {
 				}
 			} else {
 				// waiting for tx to be confirmed
-				cost := time.Now().Sub(startTime)
-				tps := (float64)(uint64(nonceValue)-startNonce) / cost.Seconds()
-				log.Printf("Total send: %d, confirmed: %d, spend: %fs, tps: %f", index, uint64(nonceValue)-startNonce, cost.Seconds(), tps)
+				curTime := time.Now()
+				curNonce := uint64(nonceValue)
+
+				cost := curTime.Sub(lastTime)
+				lastTps = 0.5*lastTps + 0.5*(float64)(curNonce-lastNonce)/cost.Seconds()
+				log.Printf("Total send: %d, confirmed: %d, spend: %fs, cur tps: %f", index, curNonce-startNonce, cost.Seconds(), lastTps)
+
+				lastTime = time.Now()
+				lastNonce = uint64(nonceValue)
 
 				if time.Now().Sub(startTime) > PressDuration {
 					log.Printf("Exit.")
