@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	wsURL            = "ws://127.0.0.1:8546"
-	rpcAddr          = "http://127.0.0.1:26657"
-	chainID    int64 = 5151
-	maxPending       = 5000
+	wsURL               = "ws://127.0.0.1:8546"
+	rpcAddr             = "http://127.0.0.1:26657"
+	chainID       int64 = 5151
+	maxPending          = 5000
+	PressDuration       = time.Second * 60
 
 	privateKeyHex        = "0xf78a036930ce63791ea6ea20072986d8c3f16a6811f6a2583b0787c45086f769"
 	recipient            = "0xb83782C315090b826C670f8a354a9dc3B4942ebf"
@@ -89,7 +90,7 @@ func batchSendTxs(num int) error {
 				log.Printf("Failed to parse poolStatus: %v", err)
 				continue
 			}
-			log.Printf("num_unconfirmed_txs total: %d", pending)
+			log.Printf("tolal num_unconfirmed_txs in mempool: %d", pending)
 
 			for maxPending-pending >= 500 {
 				tx := types.NewTx(&types.LegacyTx{
@@ -132,6 +133,7 @@ func batchSendTxs(num int) error {
 			if err := client.WriteJSON(eth.ETH_TXPoolStatus, []interface{}{}); err != nil {
 				log.Fatalf("Failed to send txpool_status request: %v", err)
 			}
+			time.Sleep(time.Second * 1)
 		case eth.ETH_RawTransaction: // eth_sendRawTransaction
 			if resp.Error != nil {
 				log.Printf("eth_sendRawTransaction Error: %v", resp.Error.Message)
@@ -171,7 +173,7 @@ func batchSendTxs(num int) error {
 				tps := (float64)(uint64(nonceValue)-startNonce) / cost.Seconds()
 				log.Printf("Total send: %d, confirmed: %d, spend: %fs, tps: %f", index, uint64(nonceValue)-startNonce, cost.Seconds(), tps)
 
-				if time.Now().Sub(startTime) > time.Minute*1 {
+				if time.Now().Sub(startTime) > PressDuration {
 					log.Printf("Exit.")
 					return nil
 				}
