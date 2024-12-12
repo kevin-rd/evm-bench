@@ -50,8 +50,8 @@ func main() {
 	}()
 
 	for i := 0; i < len(works); i++ {
-		// Slow start
-		if i > 0 && i%10 == 0 {
+		// slow start
+		if i%10 == 0 {
 			time.Sleep(PressDuration / 1000)
 		}
 

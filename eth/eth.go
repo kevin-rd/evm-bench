@@ -158,14 +158,10 @@ func (c *Client) BatchSendTxs(PressDuration time.Duration, maxPending int, ch ch
 				r.Success = true
 				r.Cost = time.Now().Sub(r.ReqTime)
 				ch <- r
+				success++
 			} else {
-				res[success] = &statistics.TestResult{
-					ChanId:  c.Id,
-					Success: true,
-				}
-				log.Printf("Error, no found testResult, wordId:%d, success:%d", c.Id, success)
+				log.Fatalf("Error, no found testResult, wordId:%d, success:%d", c.Id, success)
 			}
-			success++
 		case ETH_TransactionCount: // eth_getTransactionCount
 			if resp.Error != nil {
 				log.Printf("eth_getTransactionCount Error: %v", resp.Error.Message)
