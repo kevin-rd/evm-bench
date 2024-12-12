@@ -6,6 +6,7 @@ import (
 )
 
 type TestResult struct {
+	ChanId  int
 	Nonce   uint64        // id
 	ReqTime time.Time     // request time
 	Cost    time.Duration // total cost

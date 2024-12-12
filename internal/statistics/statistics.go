@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func HandleStatistics(concurrency uint64, res map[uint64]*TestResult, ch <-chan *TestResult) {
+func HandleStatistics(concurrency uint64, ch <-chan *TestResult) {
 	var (
 		costTimeList    []time.Duration                  // 耗时数组
 		processingTime  time.Duration   = 0              // processingTime 处理总耗时
@@ -46,7 +46,7 @@ func HandleStatistics(concurrency uint64, res map[uint64]*TestResult, ch <-chan 
 		mutex.Lock()
 
 		// total process time
-		processingTime = processingTime + respRes.Cost
+		processingTime += respRes.Cost
 		if respRes.Success {
 			successNum = successNum + 1
 			if maxTime <= respRes.Cost {
@@ -56,8 +56,8 @@ func HandleStatistics(concurrency uint64, res map[uint64]*TestResult, ch <-chan 
 				minTime = respRes.Cost
 			}
 
-			if _, ok := chanIds[0]; !ok {
-				chanIds[0] = true
+			if _, ok := chanIds[respRes.ChanId]; !ok {
+				chanIds[respRes.ChanId] = true
 				chanIdLen = uint64(len(chanIds))
 			}
 
@@ -90,9 +90,9 @@ func HandleStatistics(concurrency uint64, res map[uint64]*TestResult, ch <-chan 
 func calculateData(concurrent uint64, processingTime, costTime, maxTime, minTime time.Duration, successNum, failureNum, chanIdLen uint64, respCodeMap *sync.Map) {
 	var qps, averageTime float64
 
-	// QPS: 协程数 * (成功数/总耗时)
+	// QPS: 协程数 * (成功数/处理总耗时)
 	if processingTime != 0 {
-		qps = float64(successNum*concurrent) / processingTime.Seconds()
+		qps = float64(successNum) / costTime.Seconds()
 	}
 
 	// avg cost: 总耗时/总请求数
