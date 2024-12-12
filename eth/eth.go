@@ -47,6 +47,15 @@ func (c *Client) WriteJSON(id MethodId, params []interface{}) error {
 	})
 }
 
+func (c *Client) WriteJSONRaw(id int, method string, params []interface{}) error {
+	return c.ws.WriteJSON(&JSONRPCRequest{
+		Version: DefaultVersion,
+		Method:  method,
+		Params:  params,
+		ID:      id,
+	})
+}
+
 func (c *Client) ReadMessage() (messageType int, p []byte, err error) {
 	return c.ws.ReadMessage()
 }

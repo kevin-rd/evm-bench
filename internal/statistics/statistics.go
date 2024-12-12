@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func HandleStatics(concurrency uint64, ch <-chan *TestResult) {
+func HandleStatistics(concurrency uint64, res map[uint64]*TestResult, ch <-chan *TestResult) {
 	var (
 		costTimeList    []time.Duration                  // 耗时数组
 		processingTime  time.Duration   = 0              // processingTime 处理总耗时
@@ -56,8 +56,8 @@ func HandleStatics(concurrency uint64, ch <-chan *TestResult) {
 				minTime = respRes.Cost
 			}
 
-			if _, ok := chanIds[respRes.ChanId]; !ok {
-				chanIds[respRes.ChanId] = true
+			if _, ok := chanIds[0]; !ok {
+				chanIds[0] = true
 				chanIdLen = uint64(len(chanIds))
 			}
 

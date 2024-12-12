@@ -9,10 +9,12 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.io/kevin-rd/evm-bench/eth"
+	"github.io/kevin-rd/evm-bench/internal/statistics"
 	"log"
 	"math/big"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,13 +22,13 @@ const (
 	wsURL               = "ws://127.0.0.1:8546"
 	rpcAddr             = "http://127.0.0.1:26657"
 	chainID       int64 = 5151
-	maxPending          = 5000
-	PressDuration       = time.Second * 60
+	maxPending          = 7000
+	PressDuration       = time.Second * 120
 
-	privateKeyHex        = "0xf78a036930ce63791ea6ea20072986d8c3f16a6811f6a2583b0787c45086f769"
+	privateKeyHex        = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 	recipient            = "0xb83782C315090b826C670f8a354a9dc3B4942ebf"
 	gasLimit      uint64 = 42000
-	gasPrice             = 1000000000
+	gasPrice             = 100
 )
 
 var (
@@ -46,13 +48,24 @@ func init() {
 }
 
 func main() {
-	for i := 0; i < 1; i++ {
-		_ = batchSendTxs(5000)
-		time.Sleep(2 * time.Second)
-	}
+	res := map[uint64]*statistics.TestResult{}
+
+	var wgReceiver sync.WaitGroup
+	ch := make(chan *statistics.TestResult, 1)
+
+	// statistics
+	wgReceiver.Add(1)
+	go func() {
+		defer wgReceiver.Done()
+		log.Printf("statistics start...")
+		statistics.HandleStatistics(1, res, ch)
+	}()
+
+	_ = batchSendTxs(5000, res, ch)
+	wgReceiver.Wait()
 }
 
-func batchSendTxs(num int) error {
+func batchSendTxs(num int, res map[uint64]*statistics.TestResult, ch chan<- *statistics.TestResult) error {
 	index := 0
 	var success int
 	var nonce uint64
@@ -115,11 +128,16 @@ func batchSendTxs(num int) error {
 					log.Printf("Failed to marshal transaction: %v", err)
 					break
 				}
+				res[nonce] = &statistics.TestResult{
+					Nonce:   nonce,
+					ReqTime: time.Now(),
+				}
 				// send raw tx
 				if err := client.WriteJSON(eth.ETH_RawTransaction, []interface{}{fmt.Sprintf("0x%x", rawTx)}); err != nil {
 					log.Printf("Failed to send eth_sendRawTransaction: %v", err)
 					break
 				}
+
 				pending++
 				nonce++
 				index++
@@ -151,7 +169,18 @@ func batchSendTxs(num int) error {
 				continue
 			}
 			success++
-			// log.Printf("Received Transaction: %s", txHex)
+			//log.Printf("Successfully send tx: %s, nonce:%d", txHex, startNonce+uint64(success))
+			//err := client.WriteJSONRaw(1, "eth_getTransactionByHash", []interface{}{txHex})
+
+			if r, ok := res[startNonce+uint64(success)]; ok {
+				r.Success = true
+				r.Cost = time.Now().Sub(r.ReqTime)
+			} else {
+				res[startNonce+uint64(success)] = &statistics.TestResult{
+					Success: true,
+				}
+			}
+			ch <- res[startNonce+uint64(success)]
 		case eth.ETH_TransactionCount: // eth_getTransactionCount
 			if resp.Error != nil {
 				log.Printf("eth_getTransactionCount Error: %v", resp.Error.Message)
