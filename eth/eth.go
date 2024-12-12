@@ -229,7 +229,7 @@ func (c *Client) QueryTxTime(chTx chan *statistics.TestResult, chStatistics chan
 
 	for res := range chTx {
 		if res.BlockNum == 0 {
-			// query tx in block
+			// query tx in nextBlock
 			if err := c.WriteJSONRaw(1, "eth_getTransactionByHash", []interface{}{res.TxHash}); err != nil {
 				log.Printf("Failed to send eth_getTransactionByHash: %v", err)
 				chTx <- res
@@ -242,7 +242,7 @@ func (c *Client) QueryTxTime(chTx chan *statistics.TestResult, chStatistics chan
 				chTx <- res
 				continue
 			} else if tx.Hash == "" || tx.BlockHash == nil {
-				log.Printf("Failed to get tx: %v", tx)
+				time.Sleep(time.Second)
 				chTx <- res
 				continue
 			}
@@ -251,22 +251,28 @@ func (c *Client) QueryTxTime(chTx chan *statistics.TestResult, chStatistics chan
 		}
 
 		// find clock in local blocks
-		block, ok := blocks[res.BlockNum]
+		nextBlock, ok := blocks[res.BlockNum+1]
 		if !ok {
-			// query block from chain
-			if err := c.WriteJSONRaw(1, "eth_getBlockByNumber", []interface{}{res.BlockNum, false}); err != nil {
-				log.Printf("Failed to get block by number: %v", err)
+			// query nextBlock from chain
+			if err := c.WriteJSONRaw(1, "eth_getBlockByNumber", []interface{}{res.BlockNum + 1, false}); err != nil {
+				log.Printf("Failed to get nextBlock by number: %v", err)
 				chTx <- res
+				continue
 			}
-			if err := c.ReadJson(1, &block); err != nil {
-				log.Printf("Failed to get block: %v", err)
+			if err := c.ReadJson(1, &nextBlock); err != nil {
+				log.Printf("Failed to get nextBlock: %v", err)
 				chTx <- res
+				continue
+			} else if uint64(nextBlock.Number) != res.BlockNum+1 {
+				time.Sleep(time.Second)
+				chTx <- res
+				continue
 			}
-			blocks[res.BlockNum] = block
+			blocks[res.BlockNum+1] = nextBlock
 		}
-		res.Cost = time.Unix(int64(block.Timestamp), 0).Sub(res.ReqTime)
+		res.Cost = time.Unix(int64(nextBlock.Timestamp), 0).Sub(res.ReqTime)
 		if res.Cost <= 0 {
-			log.Printf("Error, tx time is negative, tx:%s, block:%d, time:%s, cost: %.2f", res.TxHash, res.BlockNum, res.ReqTime.Format("04:05.000"), res.Cost.Seconds())
+			log.Printf("Error, tx time is negative, tx:%s, nextBlock:%d, time:%s, cost: %.2f", res.TxHash, nextBlock.Timestamp, res.ReqTime.Format("04:05.000"), res.Cost.Seconds())
 		}
 		chStatistics <- res
 	}
