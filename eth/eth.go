@@ -148,24 +148,17 @@ func (c *Client) BatchSendTxs(PressDuration time.Duration, maxPending int, ch ch
 
 			var txHex string
 			if err := json.Unmarshal(resp.Result, &txHex); err != nil {
-				log.Printf("Failed to parse txHex: %v", err)
+				log.Printf("Error unmarshaling JSON: %v", err)
 				continue
 			}
-
-			//log.Printf("Successfully send tx: %s, nonce:%d", txHex, startNonce+uint64(success))
-			//err := client.WriteJSONRaw(1, "eth_getTransactionByHash", []interface{}{txHex})
 			if r, ok := res[success]; ok {
-				r.Success = true
-				r.Cost = time.Now().Sub(r.ReqTime)
+				r.TxHash = txHex
+				success++
 				ch <- r
 			} else {
-				res[success] = &statistics.TestResult{
-					ChanId:  c.Id,
-					Success: true,
-				}
-				log.Printf("Error, no found testResult, wordId:%d, success:%d", c.Id, success)
+				log.Fatalf("Error, no found testResult, wordId:%d, success:%d", c.Id, success)
 			}
-			success++
+			//log.Printf("Successfully send tx: %s, nonce:%d", txHex, startNonce+uint64(success))
 		case ETH_TransactionCount: // eth_getTransactionCount
 			if resp.Error != nil {
 				log.Printf("eth_getTransactionCount Error: %v", resp.Error.Message)
@@ -230,6 +223,55 @@ func (c *Client) BatchSendTxs(PressDuration time.Duration, maxPending int, ch ch
 	return nil
 }
 
+// QueryTxTime statistical tx confirmation time
+func (c *Client) QueryTxTime(chTx chan *statistics.TestResult, chStatistics chan<- *statistics.TestResult) {
+	var blocks map[uint64]Block = make(map[uint64]Block)
+
+	for res := range chTx {
+		if res.BlockNum == 0 {
+			// query tx in block
+			if err := c.WriteJSONRaw(1, "eth_getTransactionByHash", []interface{}{res.TxHash}); err != nil {
+				log.Printf("Failed to send eth_getTransactionByHash: %v", err)
+				chTx <- res
+				continue
+			}
+
+			var tx Transaction
+			if err := c.ReadJson(1, &tx); err != nil {
+				log.Printf("Failed to get tx: %v", err)
+				chTx <- res
+				continue
+			} else if tx.Hash == "" || tx.BlockHash == nil {
+				log.Printf("Failed to get tx: %v", tx)
+				chTx <- res
+				continue
+			}
+			res.Success = true
+			res.BlockNum = uint64(*tx.BlockNumber)
+		}
+
+		// find clock in local blocks
+		block, ok := blocks[res.BlockNum]
+		if !ok {
+			// query block from chain
+			if err := c.WriteJSONRaw(1, "eth_getBlockByNumber", []interface{}{res.BlockNum, false}); err != nil {
+				log.Printf("Failed to get block by number: %v", err)
+				chTx <- res
+			}
+			if err := c.ReadJson(1, &block); err != nil {
+				log.Printf("Failed to get block: %v", err)
+				chTx <- res
+			}
+			blocks[res.BlockNum] = block
+		}
+		res.Cost = time.Unix(int64(block.Timestamp), 0).Sub(res.ReqTime)
+		if res.Cost <= 0 {
+			log.Printf("Error, tx time is negative, tx:%s, block:%d, time:%s, cost: %.2f", res.TxHash, res.BlockNum, res.ReqTime.Format("04:05.000"), res.Cost.Seconds())
+		}
+		chStatistics <- res
+	}
+}
+
 func (c *Client) ReConn() error {
 	if err := c.ws.Close(); err != nil {
 		log.Fatalf("Error Close ws: %v", err)
@@ -262,8 +304,15 @@ func (c *Client) WriteJSONRaw(id int, method string, params []interface{}) error
 	})
 }
 
-func (c *Client) ReadMessage() (messageType int, p []byte, err error) {
-	return c.ws.ReadMessage()
+func (c *Client) ReadJson(id int, v any) error {
+	resp, err := c.ReadResponse()
+	if err != nil {
+		return err
+	}
+	if resp.ID != id {
+		return fmt.Errorf("invalid id: %d", resp.ID)
+	}
+	return json.Unmarshal(resp.Result, v)
 }
 
 func (c *Client) ReadResponse() (resp JSONRPCResponse, err error) {
@@ -273,6 +322,10 @@ func (c *Client) ReadResponse() (resp JSONRPCResponse, err error) {
 	}
 	err = json.Unmarshal(message, &resp)
 	return
+}
+
+func (c *Client) ReadMessage() (messageType int, p []byte, err error) {
+	return c.ws.ReadMessage()
 }
 
 func (c *Client) Close() error {

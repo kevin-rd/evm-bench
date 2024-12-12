@@ -12,7 +12,7 @@ const (
 	wsURL   = "ws://127.0.0.1:8546"
 	rpcAddr = "http://127.0.0.1:26657"
 
-	maxPending    = 3000
+	maxPending    = 2000
 	PressDuration = time.Second * 120
 
 	recipientAddr = "0x2344991936359AAcaAC175198F556c08cd74dF55"
@@ -29,11 +29,13 @@ var accounts = []string{
 func main() {
 	var wg sync.WaitGroup
 	var wgReceiver sync.WaitGroup
-	ch := make(chan *statistics.TestResult, 1)
+
+	chTemp := make(chan *statistics.TestResult, len(accounts)*1000)
+	chStatistics := make(chan *statistics.TestResult)
 
 	// 建立连接
 	works := make([]*eth.Client, len(accounts))
-	for i := 0; i < len(accounts); i++ {
+	for i := 0; i < len(works); i++ {
 		client, err := eth.NewClient(i, wsURL, rpcAddr, accounts[i], recipientAddr)
 		if err != nil {
 			log.Fatal("Failed to connect to WebSocket:", err)
@@ -41,23 +43,30 @@ func main() {
 		works[i] = client
 	}
 
+	// query time
+	go func() {
+		client, _ := eth.NewClient(0, wsURL, rpcAddr, accounts[0], recipientAddr)
+		client.QueryTxTime(chTemp, chStatistics)
+		log.Printf("query time done")
+	}()
+
 	// statistics
 	wgReceiver.Add(1)
 	go func() {
 		defer wgReceiver.Done()
 		log.Printf("statistics start...")
-		statistics.HandleStatistics(uint64(len(works)), ch)
+		statistics.HandleStatistics(uint64(len(works)), chStatistics)
 	}()
 
 	for i := 0; i < len(works); i++ {
-		// Slow start
-		if i > 0 && i%10 == 0 {
+		// slow start
+		if i%10 == 0 {
 			time.Sleep(PressDuration / 1000)
 		}
 
 		wg.Add(1)
 		log.Printf("worker %d start...", i)
-		go func(index int, ch chan<- *statistics.TestResult) {
+		go func(index int, ch chan *statistics.TestResult) {
 			defer wg.Done()
 
 			err := works[i].BatchSendTxs(PressDuration, maxPending, ch)
@@ -65,9 +74,10 @@ func main() {
 				log.Printf("worker %d failed: %v", index, err)
 				return
 			}
-		}(i, ch)
+		}(i, chTemp)
 	}
 	wg.Wait()
-	close(ch)
+	close(chTemp)
+	close(chStatistics)
 	wgReceiver.Wait()
 }

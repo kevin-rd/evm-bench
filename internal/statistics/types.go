@@ -6,11 +6,13 @@ import (
 )
 
 type TestResult struct {
-	ChanId  int
-	Nonce   uint64        // id
-	ReqTime time.Time     // request time
-	Cost    time.Duration // total cost
-	Success bool          // success
+	ChanId   int
+	Nonce    uint64        // id
+	TxHash   string        // tx hash
+	BlockNum uint64        // block number
+	ReqTime  time.Time     // request time
+	Cost     time.Duration // total cost
+	Success  bool          // success
 }
 
 func (tr *TestResult) String() string {

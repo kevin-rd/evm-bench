@@ -60,3 +60,17 @@ type PoolStatus struct {
 	Pending hexutil.Uint `json:"pending"`
 	Queued  hexutil.Uint `json:"queued"`
 }
+
+// Transaction is an Ethereum transaction.
+type Transaction struct {
+	BlockNumber *hexutil.Uint64 `json:"blockNumber"`
+	BlockHash   *string         `json:"blockHash"`
+	Hash        string          `json:"hash"`
+	Nonce       hexutil.Uint64  `json:"nonce"`
+}
+
+type Block struct {
+	Number    hexutil.Uint64 `json:"number"`
+	Timestamp hexutil.Uint64 `json:"timestamp"`
+	Hash      string         `json:"hash"`
+}
