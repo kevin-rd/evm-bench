@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.io/kevin-rd/evm-bench/eth"
+	"github.io/kevin-rd/evm-bench/internal/account"
 	"github.io/kevin-rd/evm-bench/internal/statistics"
 	"log"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 const (
 	wsURL   = "ws://127.0.0.1:8546"
+	evmURL  = "http://127.0.0.1:8545"
 	rpcAddr = "http://127.0.0.1:26657"
 
 	maxPending    = 2000
@@ -26,7 +28,7 @@ var accounts = []string{
 	"47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a",
 }
 
-func main() {
+func main2() {
 	var wg sync.WaitGroup
 	var wgReceiver sync.WaitGroup
 
@@ -80,4 +82,14 @@ func main() {
 	close(chTemp)
 	close(chStatistics)
 	wgReceiver.Wait()
+}
+
+func main() {
+	keys, err := account.GenerateAccounts("accounts.txt", 100)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	_ = account.TransferAccounts(evmURL, accounts[0], keys)
+	log.Printf("transfer done")
 }
