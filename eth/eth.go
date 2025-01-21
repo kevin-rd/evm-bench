@@ -94,7 +94,7 @@ func (c *Client) BatchSendTxs(PressDuration time.Duration, maxPending int, ch ch
 					tx := types.NewTx(&types.LegacyTx{
 						Nonce:    nonce,
 						To:       &c.toAddress,
-						Value:    big.NewInt(1000000000),
+						Value:    big.NewInt(123000000000),
 						Gas:      gasLimit,
 						GasPrice: big.NewInt(gasPrice),
 					})
