@@ -11,8 +11,8 @@ import (
 
 const (
 	wsURL   = "ws://127.0.0.1:8546"
-	evmURL  = "http://127.0.0.1:8545"
-	rpcAddr = "http://127.0.0.1:26657"
+	evmURL  = "http://devint-rpc.mechain.tech:80"
+	rpcAddr = "http://devint-lcd.mechain.tech:80"
 
 	maxPending    = 2000
 	PressDuration = time.Second * 120
@@ -90,6 +90,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	_ = account.TransferAccounts(evmURL, accounts[0], keys)
+	err = account.TransferAccounts(rpcAddr, evmURL, accounts[0], keys)
+	if err != nil {
+		log.Printf("transfer failed: %v", err)
+	}
 	log.Printf("transfer done")
 }

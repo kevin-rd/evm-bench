@@ -2,70 +2,50 @@ package account
 
 import (
 	"context"
+	"cosmossdk.io/math"
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/ethereum/go-ethereum/ethclient"
-	"log"
-	"math/big"
-
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/evmos/evmos/v12/sdk/types"
+	mechainclient "github.com/zkMeLabs/mechain-go-sdk/client"
+	mechaintypes "github.com/zkMeLabs/mechain-go-sdk/types"
+	"log"
 )
 
-func TransferAccounts(url, privateKeyHex string, keys []string) error {
-	client, err := ethclient.Dial(url)
+func TransferAccounts(rpcUrl, evmUrl, privateKeyHex string, keys []string) error {
+
+	account, err := mechaintypes.NewAccountFromPrivateKey("default-account", privateKeyHex)
 	if err != nil {
-		log.Fatal(err)
-	}
-	privateKey, err := crypto.HexToECDSA(privateKeyHex)
-	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("valid private to")
 	}
 
-	publicKey := privateKey.Public()
-	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
-	if !ok {
-		log.Fatal("cannot assert type: publicKey is not of type *ecdsa.PublicKey")
-	}
-
-	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
-	nonce, err := client.PendingNonceAt(context.Background(), fromAddress)
+	cli, err := mechainclient.New("mechain_5151-1", rpcUrl, evmUrl, privateKeyHex, mechainclient.Option{DefaultAccount: account})
 	if err != nil {
-		log.Fatal(err)
+		return fmt.Errorf("valid private to")
 	}
 
-	value := big.NewInt(1000000000000000000) // in wei
-	gasPrice, err := client.SuggestGasPrice(context.Background())
-	if err != nil {
-		log.Fatal(err)
-	}
-
+	amount := math.NewIntWithDecimal(20, 18)
 	for _, key := range keys {
+
 		to, err := toAddress(key)
 		if err != nil {
-			return fmt.Errorf("valid private key")
+			return fmt.Errorf("valid private to")
 		}
 
-		tx := types.NewTransaction(nonce, to, value, 210000, gasPrice, nil)
-
-		chainID, err := client.NetworkID(context.Background())
+		txHash, err := cli.Transfer(context.TODO(), to.Hex(), amount, types.TxOption{})
 		if err != nil {
-			log.Fatal(err)
+			return fmt.Errorf("transfer %s azkme to address %s failed, err: %v", amount, to, err)
 		}
 
-		signedTx, err := types.SignTx(tx, types.NewEIP155Signer(chainID), privateKey)
+		tx, err := cli.WaitForTx(context.TODO(), txHash)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
-
-		err = client.SendTransaction(context.Background(), signedTx)
-		if err != nil {
-			log.Fatal(err)
+		if tx.TxResult.Code != 0 {
+			return fmt.Errorf("transfer %s azkme to address %s failed, err: %v", amount, to, err)
 		}
-
-		fmt.Printf("tx sent: %s", signedTx.Hash().Hex())
-
+		log.Printf("transfer %s azkme to address %s success, txHash: %s", amount, to, txHash)
 	}
 	return nil
 }
