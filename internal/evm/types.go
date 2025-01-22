@@ -1,10 +1,18 @@
-package eth
+package evm
 
 import (
+	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 )
+
+type Account struct {
+	PrivateKey *ecdsa.PrivateKey
+	Address    *common.Address
+	Nonce      uint64
+}
 
 const (
 	DefaultVersion = "2.0"
